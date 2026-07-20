@@ -16,8 +16,13 @@ export async function updateCompany(req, res) {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    if (req.authUser.role !== "company_admin" && req.authUser.role !== "super_admin") {
-      return res.status(403).json({ error: "Only company admins can update company settings." });
+    if (
+      req.authUser.role !== "company_admin" &&
+      req.authUser.role !== "super_admin"
+    ) {
+      return res
+        .status(403)
+        .json({ error: "Only company admins can update company settings." });
     }
 
     const companyId = req.authUser.company._id;

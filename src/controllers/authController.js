@@ -6,7 +6,7 @@ function createToken(user) {
   return jwt.sign(
     { id: user._id.toString(), email: user.email, role: user.role },
     process.env.JWT_SECRET || "dev-secret",
-    { expiresIn: "15m" },
+    { expiresIn: "30d" },
   );
 }
 
