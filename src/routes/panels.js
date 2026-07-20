@@ -25,13 +25,7 @@ router.post(
   authorize("company_admin"),
   generateQr,
 );
-router.put(
-  "/complete-installation/:panelId",
-  authenticate,
-  requireUser,
-  authorize("company_admin"),
-  completeInstallation,
-);
+router.put("/complete-installation/:panelId", completeInstallation);
 router.post(
   "/",
   authenticate,

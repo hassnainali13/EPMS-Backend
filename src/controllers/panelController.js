@@ -191,12 +191,26 @@ export async function publicPanel(req, res) {
 export async function completeInstallation(req, res) {
   try {
     const installerCode = req.body.code;
-    if (!installerCode || installerCode !== process.env.INSTALLER_ACCESS_CODE) {
+    const panel = await Panel.findOne({ panelId: req.params.panelId });
+    if (!panel) return res.status(404).json({ error: "Panel not found" });
+
+    const company = await Company.findById(panel.companyId).lean();
+    if (!company) return res.status(404).json({ error: "Company not found" });
+
+    if (
+      !installerCode ||
+      installerCode !== company.installerAccessCode ||
+      !company.installerAccessCode
+    ) {
       return res.status(403).json({ error: "Invalid installer code." });
     }
 
-    const panel = await Panel.findOne({ panelId: req.params.panelId });
-    if (!panel) return res.status(404).json({ error: "Panel not found" });
+    if (
+      panel.status === "Installed" ||
+      (panel.installer && panel.installationDate && panel.installationLocation)
+    ) {
+      return res.status(400).json({ error: "Installation already completed." });
+    }
 
     const updates = {};
     if (req.body.installer !== undefined)

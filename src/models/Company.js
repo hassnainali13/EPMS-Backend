@@ -31,6 +31,7 @@ const companySchema = new mongoose.Schema(
     address: { type: String, default: "" },
     website: { type: String, default: "" },
     logoUrl: { type: String, default: "" },
+    installerAccessCode: { type: String, default: "" },
     status: { type: String, enum: ["active", "suspended"], default: "active" },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
