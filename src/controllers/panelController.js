@@ -89,9 +89,14 @@ export async function listPanels(req, res) {
 
 export async function lookupPanel(req, res) {
   try {
-    const panel = await Panel.findOne({ panelId: req.params.panelId });
+    const panel = await Panel.findOne({ panelId: req.params.panelId }).populate(
+      "company",
+      "name",
+    );
     if (!panel) return res.status(404).json({ error: "Panel not found" });
-    res.json({ panel });
+    const panelObj = panel.toObject();
+    panelObj.companyName = panelObj.company?.name || panelObj.companyName || "";
+    res.json({ panel: panelObj });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -176,8 +181,10 @@ export async function publicPanel(req, res) {
   try {
     const panel = await Panel.findOne({ panelId: req.params.panelId });
     if (!panel) return res.status(404).json({ error: "Panel not found" });
+    const company = await Company.findById(panel.companyId).lean();
     // Return same shape as lookupPanel but without sensitive fields
     const safe = panel.toObject();
+    safe.companyName = company?.name || safe.companyName || "";
     delete safe.companyId;
     delete safe.company;
     delete safe.createdBy;
