@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Company from "../models/Company.js";
 import Panel from "../models/Panel.js";
 import { getPanelTypeCode } from "../utils/panelTypes.js";
@@ -369,10 +370,19 @@ export async function updatePanel(req, res) {
 export async function deletePanel(req, res) {
   try {
     const companyId = req.authUser.company._id;
-    const panel = await Panel.findOneAndDelete({
-      _id: req.params.id,
-      companyId,
-    });
+    const idQuery = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? [{ _id: req.params.id }, { panelId: req.params.id }]
+      : [{ panelId: req.params.id }];
+
+    const query = {
+      $or: idQuery,
+    };
+
+    if (req.authUser.role !== "super_admin") {
+      query.companyId = companyId;
+    }
+
+    const panel = await Panel.findOneAndDelete(query);
     if (!panel) return res.status(404).json({ error: "Panel not found" });
     res.json({ ok: true });
   } catch (error) {

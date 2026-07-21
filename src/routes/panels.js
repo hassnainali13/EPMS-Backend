@@ -44,7 +44,7 @@ router.delete(
   "/:id",
   authenticate,
   requireUser,
-  authorize("company_admin"),
+  authorize("company_admin", "employee", "super_admin"),
   deletePanel,
 );
 
