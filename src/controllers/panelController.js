@@ -77,28 +77,68 @@ export async function listPanels(req, res) {
       ];
     }
 
+    console.log(
+      `[DEBUG] listPanels - Fetching panels for company: ${companyId}`,
+    );
+
     const panels = await Panel.find(filter)
+      .populate("company", "name")
       .sort({ createdAt: -1 })
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
+
+    console.log(`[DEBUG] listPanels - Found ${panels.length} panels`);
+    console.log(
+      `[DEBUG] listPanels - First panel company type: ${panels.length > 0 ? typeof panels[0].company : "N/A"}`,
+    );
+
+    // Add companyName to each panel for consistency
+    const panelsWithNames = panels.map((p) => {
+      const obj = p.toObject();
+      obj.companyName = obj.company?.name || "";
+      return obj;
+    });
+
+    console.log(
+      `[DEBUG] listPanels - First panel companyName: ${panelsWithNames.length > 0 ? panelsWithNames[0].companyName : "N/A"}`,
+    );
+
     const total = await Panel.countDocuments(filter);
-    res.json({ panels, total });
+    res.json({ panels: panelsWithNames, total });
   } catch (error) {
+    console.error(`[DEBUG] listPanels - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
 
 export async function lookupPanel(req, res) {
   try {
-    const panel = await Panel.findOne({ panelId: req.params.panelId }).populate(
-      "company",
-      "name",
+    const panelId = req.params.panelId;
+    console.log(`[DEBUG] lookupPanel - Fetching panel: ${panelId}`);
+
+    const panel = await Panel.findOne({ panelId }).populate("company", "name");
+
+    if (!panel) {
+      console.log(`[DEBUG] lookupPanel - Panel not found: ${panelId}`);
+      return res.status(404).json({ error: "Panel not found" });
+    }
+
+    console.log(
+      `[DEBUG] lookupPanel - Panel found, company field type: ${typeof panel.company}`,
     );
-    if (!panel) return res.status(404).json({ error: "Panel not found" });
+    console.log(`[DEBUG] lookupPanel - Panel.company value:`, panel.company);
+
     const panelObj = panel.toObject();
     panelObj.companyName = panelObj.company?.name || "";
+
+    console.log(
+      `[DEBUG] lookupPanel - Final response companyName: ${panelObj.companyName}`,
+    );
+    console.log(`[DEBUG] lookupPanel - Final company field:`, panelObj.company);
+
     res.json({ panel: panelObj });
   } catch (error) {
+    console.error(`[DEBUG] lookupPanel - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
@@ -180,20 +220,49 @@ export async function generateQr(req, res) {
 
 export async function publicPanel(req, res) {
   try {
-    const panel = await Panel.findOne({ panelId: req.params.panelId }).populate(
-      "company",
-      "name",
+    const panelId = req.params.panelId;
+    console.log(`[DEBUG] publicPanel - Fetching panel: ${panelId}`);
+
+    const panel = await Panel.findOne({ panelId }).populate("company", "name");
+
+    if (!panel) {
+      console.log(`[DEBUG] publicPanel - Panel not found: ${panelId}`);
+      return res.status(404).json({ error: "Panel not found" });
+    }
+
+    console.log(
+      `[DEBUG] publicPanel - Panel found, company field type: ${typeof panel.company}`,
     );
-    if (!panel) return res.status(404).json({ error: "Panel not found" });
+    console.log(`[DEBUG] publicPanel - Panel.company value:`, panel.company);
+
     // Return same shape as lookupPanel but without sensitive fields
     const safe = panel.toObject();
     safe.companyName = safe.company?.name || "";
+
+    console.log(
+      `[DEBUG] publicPanel - Before deletion - company:`,
+      safe.company,
+    );
+    console.log(
+      `[DEBUG] publicPanel - Before deletion - companyName: ${safe.companyName}`,
+    );
+
     delete safe.companyId;
     delete safe.company;
     delete safe.createdBy;
     delete safe.updatedBy;
+
+    console.log(
+      `[DEBUG] publicPanel - After deletion - company:`,
+      safe.company,
+    );
+    console.log(
+      `[DEBUG] publicPanel - Final response companyName: ${safe.companyName}`,
+    );
+
     res.json({ panel: safe });
   } catch (error) {
+    console.error(`[DEBUG] publicPanel - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
@@ -239,10 +308,17 @@ export async function completeInstallation(req, res) {
       { panelId: req.params.panelId },
       { $set: updates },
       { new: true },
-    );
+    ).populate("company", "name");
 
-    res.json({ panel: updatedPanel });
+    const panelObj = updatedPanel.toObject();
+    panelObj.companyName = panelObj.company?.name || "";
+
+    console.log(
+      `[DEBUG] completeInstallation - Updated panel with company: ${panelObj.companyName}`,
+    );
+    res.json({ panel: panelObj });
   } catch (error) {
+    console.error(`[DEBUG] completeInstallation - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
@@ -309,8 +385,21 @@ export async function createPanel(req, res) {
     payload.updatedBy = req.authUser._id;
 
     const panel = await Panel.create(payload);
-    res.json({ panel });
+
+    // Populate company name before returning
+    const populatedPanel = await Panel.findById(panel._id).populate(
+      "company",
+      "name",
+    );
+    const panelObj = populatedPanel.toObject();
+    panelObj.companyName = panelObj.company?.name || "";
+
+    console.log(
+      `[DEBUG] createPanel - Created panel with company: ${panelObj.companyName}`,
+    );
+    res.json({ panel: panelObj });
   } catch (error) {
+    console.error(`[DEBUG] createPanel - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
@@ -362,9 +451,17 @@ export async function updatePanel(req, res) {
       req.params.id,
       { $set: updates },
       { new: true },
+    ).populate("company", "name");
+
+    const panelObj = updated.toObject();
+    panelObj.companyName = panelObj.company?.name || "";
+
+    console.log(
+      `[DEBUG] updatePanel - Updated panel with company: ${panelObj.companyName}`,
     );
-    res.json({ panel: updated });
+    res.json({ panel: panelObj });
   } catch (error) {
+    console.error(`[DEBUG] updatePanel - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 }
