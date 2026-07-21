@@ -96,7 +96,7 @@ export async function lookupPanel(req, res) {
     );
     if (!panel) return res.status(404).json({ error: "Panel not found" });
     const panelObj = panel.toObject();
-    panelObj.companyName = panelObj.company?.name || panelObj.companyName || "";
+    panelObj.companyName = panelObj.company?.name || "";
     res.json({ panel: panelObj });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -180,16 +180,14 @@ export async function generateQr(req, res) {
 
 export async function publicPanel(req, res) {
   try {
-    const panel = await Panel.findOne({ panelId: req.params.panelId });
+    const panel = await Panel.findOne({ panelId: req.params.panelId }).populate(
+      "company",
+      "name",
+    );
     if (!panel) return res.status(404).json({ error: "Panel not found" });
-    const company = await Company.findById(panel.companyId).lean();
     // Return same shape as lookupPanel but without sensitive fields
     const safe = panel.toObject();
-    safe.companyName =
-      company?.name ||
-      safe.companyName ||
-      (typeof safe.company === "string" ? safe.company : safe.company?.name) ||
-      "";
+    safe.companyName = safe.company?.name || "";
     delete safe.companyId;
     delete safe.company;
     delete safe.createdBy;
