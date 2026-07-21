@@ -185,7 +185,11 @@ export async function publicPanel(req, res) {
     const company = await Company.findById(panel.companyId).lean();
     // Return same shape as lookupPanel but without sensitive fields
     const safe = panel.toObject();
-    safe.companyName = company?.name || safe.companyName || "";
+    safe.companyName =
+      company?.name ||
+      safe.companyName ||
+      (typeof safe.company === "string" ? safe.company : safe.company?.name) ||
+      "";
     delete safe.companyId;
     delete safe.company;
     delete safe.createdBy;
