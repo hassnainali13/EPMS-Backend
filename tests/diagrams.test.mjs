@@ -37,7 +37,13 @@ test("reuses an existing company diagram when the same file is uploaded again", 
   };
 
   const result = await findOrCreateDiagramForCompany(
-    { companyId: "company-1", name: "Main Wiring", url: "https://example.com/diagram.png", publicId: "epms/diagram-1", fileType: "image/png" },
+    {
+      companyId: "company-1",
+      name: "Main Wiring",
+      url: "https://example.com/diagram.png",
+      publicId: "epms/diagram-1",
+      fileType: "image/png",
+    },
     { findOne, create },
   );
 

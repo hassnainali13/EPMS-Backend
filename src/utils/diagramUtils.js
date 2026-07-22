@@ -17,10 +17,7 @@ export function normalizeDiagramPayload(input = {}) {
   return payload;
 }
 
-export async function findOrCreateDiagramForCompany(
-  input = {},
-  deps = {},
-) {
+export async function findOrCreateDiagramForCompany(input = {}, deps = {}) {
   const normalized = normalizeDiagramPayload(input);
   const companyId = String(input?.companyId || "").trim();
   const findOne = deps.findOne || (() => Promise.resolve(null));
@@ -33,7 +30,8 @@ export async function findOrCreateDiagramForCompany(
   const orConditions = [];
   if (normalized.publicId) orConditions.push({ publicId: normalized.publicId });
   if (normalized.url) orConditions.push({ url: normalized.url });
-  if (normalized.libraryId) orConditions.push({ libraryId: normalized.libraryId });
+  if (normalized.libraryId)
+    orConditions.push({ libraryId: normalized.libraryId });
 
   const query = { companyId };
   if (orConditions.length > 0) {

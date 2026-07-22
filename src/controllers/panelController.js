@@ -407,7 +407,8 @@ export async function createPanel(req, res) {
           },
           {
             findOne: (query) => Diagram.findOne({ companyId, ...query }),
-            create: (data) => Diagram.create({ ...data, company: companyId, companyId }),
+            create: (data) =>
+              Diagram.create({ ...data, company: companyId, companyId }),
           },
         );
 
@@ -417,8 +418,17 @@ export async function createPanel(req, res) {
             url: diagram.url || trimmed.url || "",
             publicId: diagram.publicId || trimmed.publicId || "",
             fileType: diagram.fileType || trimmed.fileType || "",
-            source: trimmed.libraryId || diagram.libraryId || diagram._id?.toString?.() ? "library" : (trimmed.source || "upload"),
-            libraryId: diagram.libraryId || trimmed.libraryId || diagram._id?.toString?.() || "",
+            source:
+              trimmed.libraryId ||
+              diagram.libraryId ||
+              diagram._id?.toString?.()
+                ? "library"
+                : trimmed.source || "upload",
+            libraryId:
+              diagram.libraryId ||
+              trimmed.libraryId ||
+              diagram._id?.toString?.() ||
+              "",
           });
         } else {
           nextDiagrams.push(trimmed);
