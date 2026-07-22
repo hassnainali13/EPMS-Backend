@@ -8,6 +8,7 @@ import installationRoutes from "./installations.js";
 import maintenanceRoutes from "./maintenance.js";
 import uploadRoutes from "./uploads.js";
 import instrumentRoutes from "./instruments.js";
+import diagramRoutes from "./diagrams.js";
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.use("/api/installations", installationRoutes);
 router.use("/api/maintenance", maintenanceRoutes);
 router.use("/api/uploads", uploadRoutes);
 router.use("/api/instruments", instrumentRoutes);
+router.use("/api/diagrams", diagramRoutes);
 router.use("/api/admin", adminRoutes);
 
 export default router;

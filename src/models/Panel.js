@@ -112,6 +112,12 @@ const panelSchema = new mongoose.Schema(
           url: { type: String, default: "" },
           publicId: { type: String, default: "" },
           fileType: { type: String, default: "" },
+          source: {
+            type: String,
+            enum: ["upload", "library"],
+            default: "upload",
+          },
+          libraryId: { type: String, default: "" },
         },
       ],
       default: [],

@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import Company from "../models/Company.js";
 import Panel from "../models/Panel.js";
+import Diagram from "../models/Diagram.js";
+import { findOrCreateDiagramForCompany } from "../utils/diagramUtils.js";
 import { getPanelTypeCode } from "../utils/panelTypes.js";
 
 function escapeRegex(value) {
@@ -384,6 +386,46 @@ export async function createPanel(req, res) {
     payload.companyId = companyId;
     payload.createdBy = req.authUser._id;
     payload.updatedBy = req.authUser._id;
+
+    if (Array.isArray(payload.diagrams)) {
+      const nextDiagrams = [];
+      for (const entry of payload.diagrams) {
+        const trimmed = entry && typeof entry === "object" ? entry : {};
+        if (!trimmed.url && !trimmed.publicId) {
+          nextDiagrams.push(trimmed);
+          continue;
+        }
+
+        const diagram = await findOrCreateDiagramForCompany(
+          {
+            companyId: String(companyId),
+            name: trimmed.name || "Wiring Diagram",
+            url: trimmed.url || "",
+            publicId: trimmed.publicId || "",
+            fileType: trimmed.fileType || "",
+            libraryId: trimmed.libraryId || "",
+          },
+          {
+            findOne: (query) => Diagram.findOne({ companyId, ...query }),
+            create: (data) => Diagram.create({ ...data, company: companyId, companyId }),
+          },
+        );
+
+        if (diagram) {
+          nextDiagrams.push({
+            ...trimmed,
+            url: diagram.url || trimmed.url || "",
+            publicId: diagram.publicId || trimmed.publicId || "",
+            fileType: diagram.fileType || trimmed.fileType || "",
+            source: trimmed.libraryId || diagram.libraryId || diagram._id?.toString?.() ? "library" : (trimmed.source || "upload"),
+            libraryId: diagram.libraryId || trimmed.libraryId || diagram._id?.toString?.() || "",
+          });
+        } else {
+          nextDiagrams.push(trimmed);
+        }
+      }
+      payload.diagrams = nextDiagrams;
+    }
 
     const panel = await Panel.create(payload);
 
