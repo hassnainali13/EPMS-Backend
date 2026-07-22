@@ -25,7 +25,7 @@ export async function uploadImage(req, res) {
         { resource_type: "image", folder: "epms/panels" },
         (error, result) => {
           if (error) return reject(error);
-          res.json({ url: result.secure_url });
+          res.json({ url: result.secure_url, publicId: result.public_id });
           resolve(result);
         },
       );

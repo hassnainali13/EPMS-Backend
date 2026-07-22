@@ -105,6 +105,21 @@ const panelSchema = new mongoose.Schema(
       namePlateImage: { type: String, default: "" },
       sideImage: { type: String, default: "" },
     },
+    diagrams: {
+      type: [
+        {
+          name: { type: String, default: "" },
+          url: { type: String, default: "" },
+          publicId: { type: String, default: "" },
+          fileType: { type: String, default: "" },
+        },
+      ],
+      default: [],
+      validate: {
+        validator: (value) => Array.isArray(value) && value.length <= 5,
+        message: "A panel can have at most 5 wiring diagrams.",
+      },
+    },
     instrumentModels: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
