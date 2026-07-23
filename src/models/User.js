@@ -27,6 +27,13 @@ const userSchema = new mongoose.Schema(
     },
     plan: { type: String, enum: ["FREE", "PREMIUM"], default: "FREE" },
     blocked: { type: Boolean, default: false },
+    isEmailVerified: { type: Boolean, default: false },
+    verificationOTPHash: { type: String, default: null },
+    verificationOTPExpiresAt: { type: Date, default: null },
+    verificationOTPRequestedAt: { type: Date, default: null },
+    forgotPasswordOTPHash: { type: String, default: null },
+    forgotPasswordOTPExpiresAt: { type: Date, default: null },
+    forgotPasswordOTPRequestedAt: { type: Date, default: null },
     company: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
