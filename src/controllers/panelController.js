@@ -64,6 +64,35 @@ async function generatePanelId(companyId, companyName, panelType) {
   return `${prefix}${year}-${panelTypeCode}-${String(nextSequence).padStart(4, "0")}`;
 }
 
+function validateInstrumentQuantities(technicalSpecs, instrumentModels) {
+  const quantities = technicalSpecs?.instrumentQuantities;
+  if (!quantities || typeof quantities !== "object") return null;
+  if (!instrumentModels || typeof instrumentModels !== "object") {
+    return "Instrument model data is required when quantities are provided.";
+  }
+
+  for (const [category, rawQuantity] of Object.entries(quantities)) {
+    const quantity = Number(rawQuantity || 0);
+    if (quantity <= 0) continue;
+    const entries = instrumentModels[category];
+    if (!Array.isArray(entries)) {
+      return `Instrument models are missing for ${category}.`;
+    }
+
+    const total = entries.reduce((sum, entry) => {
+      if (entry && typeof entry === "object") {
+        const entryQuantity = Number(entry.quantity);
+        return sum + (Number.isFinite(entryQuantity) && entryQuantity > 0 ? entryQuantity : 1);
+      }
+      return sum + 1;
+    }, 0);
+    if (total !== quantity) {
+      return `${category} model quantities must total ${quantity}.`;
+    }
+  }
+  return null;
+}
+
 export async function listPanels(req, res) {
   try {
     const companyId = req.authUser.company._id;
@@ -385,6 +414,12 @@ export async function createPanel(req, res) {
       if (req.body[k] !== undefined) payload[k] = req.body[k];
     });
 
+    const instrumentError = validateInstrumentQuantities(
+      payload.technicalSpecs,
+      payload.instrumentModels,
+    );
+    if (instrumentError) return res.status(400).json({ error: instrumentError });
+
     // Installation status can only be established by the completion endpoint.
     payload.status = "Ready";
 
@@ -505,6 +540,12 @@ export async function updatePanel(req, res) {
     allowed.forEach((k) => {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     });
+
+    const instrumentError = validateInstrumentQuantities(
+      updates.technicalSpecs || panel.technicalSpecs,
+      updates.instrumentModels || panel.instrumentModels,
+    );
+    if (instrumentError) return res.status(400).json({ error: instrumentError });
 
     if (updates.status !== undefined) {
       if (!["Ready", "Installed"].includes(updates.status)) {
