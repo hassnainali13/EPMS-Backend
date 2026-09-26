@@ -1,9 +1,45 @@
 import mongoose from "mongoose";
+import { randomInt } from "node:crypto";
+import jwt from "jsonwebtoken";
 import Company from "../models/Company.js";
 import Panel from "../models/Panel.js";
 import Diagram from "../models/Diagram.js";
 import { findOrCreateDiagramForCompany } from "../utils/diagramUtils.js";
 import { getPanelTypeCode } from "../utils/panelTypes.js";
+
+const installerCodeAttempts = new Map();
+const INSTALLER_CODE_ATTEMPT_LIMIT = 5;
+const INSTALLER_CODE_WINDOW_MS = 15 * 60 * 1000;
+
+async function generatePublicAccessCode() {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = String(randomInt(100_000_000_000, 1_000_000_000_000));
+    const exists = await Panel.exists({ publicAccessCode: code });
+    if (!exists) return code;
+  }
+  throw new Error("Unable to allocate a unique panel access code.");
+}
+
+function panelPublicSummary(panel, companyName, includeInstallationDetails = false) {
+  const summary = {
+    panelId: panel.panelId,
+    panelName: panel.panelName,
+    panelType: panel.panelType,
+    status: panel.status,
+    companyName,
+  };
+
+  if (!includeInstallationDetails) return summary;
+
+  return {
+    ...summary,
+    customer: panel.customer,
+    installationLocation: panel.installationLocation,
+    installer: panel.installer,
+    installationDate: panel.installationDate,
+    description: panel.description,
+  };
+}
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -252,68 +288,136 @@ export async function generateQr(req, res) {
 export async function publicPanel(req, res) {
   try {
     const panelId = req.params.panelId;
-    console.log(`[DEBUG] publicPanel - Fetching panel: ${panelId}`);
+    const panel = await Panel.findOne({ panelId })
+      .select("+publicAccessCode")
+      .populate("company", "name");
+    if (!panel) return res.status(404).json({ error: "Panel not found" });
 
-    const panel = await Panel.findOne({ panelId }).populate("company", "name");
-
-    if (!panel) {
-      console.log(`[DEBUG] publicPanel - Panel not found: ${panelId}`);
-      return res.status(404).json({ error: "Panel not found" });
+    if (panel.status === "Installed" && !panel.publicAccessCode) {
+      panel.publicAccessCode = await generatePublicAccessCode();
+      await panel.save();
     }
 
-    console.log(
-      `[DEBUG] publicPanel - Panel found, company field type: ${typeof panel.company}`,
-    );
-    console.log(`[DEBUG] publicPanel - Panel.company value:`, panel.company);
+    res.json({
+      panel: panelPublicSummary(panel, panel.company?.name || ""),
+      ...(panel.status === "Installed"
+        ? { publicAccessCode: panel.publicAccessCode }
+        : {}),
+    });
+  } catch (error) {
+    console.error("Public panel lookup failed:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+}
 
-    // Return same shape as lookupPanel but without sensitive fields
+export async function publicPanelDetails(req, res) {
+  try {
+    const { panelId, accessCode } = req.params;
+    const panel = await Panel.findOne({
+      panelId,
+      publicAccessCode: accessCode,
+      status: "Installed",
+    })
+      .select("+publicAccessCode")
+      .populate("company", "name");
+
+    if (!panel) return res.status(404).json({ error: "Panel not found" });
+
     const safe = panel.toObject();
     safe.companyName = safe.company?.name || "";
-
-    console.log(
-      `[DEBUG] publicPanel - Before deletion - company:`,
-      safe.company,
-    );
-    console.log(
-      `[DEBUG] publicPanel - Before deletion - companyName: ${safe.companyName}`,
-    );
-
     delete safe.companyId;
     delete safe.company;
     delete safe.createdBy;
     delete safe.updatedBy;
+    delete safe.publicAccessCode;
 
-    console.log(
-      `[DEBUG] publicPanel - After deletion - company:`,
-      safe.company,
-    );
-    console.log(
-      `[DEBUG] publicPanel - Final response companyName: ${safe.companyName}`,
-    );
-
-    res.json({ panel: safe });
+    return res.json({ panel: safe });
   } catch (error) {
-    console.error(`[DEBUG] publicPanel - ERROR: ${error.message}`);
-    res.status(500).json({ error: error.message });
+    console.error("Public panel detail lookup failed:", error.message);
+    return res.status(500).json({ error: "Unable to load panel details." });
+  }
+}
+
+export async function verifyInstallerCode(req, res) {
+  const panelId = req.params.panelId;
+  const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+  const attemptKey = `${panelId}:${clientIp}`;
+  const now = Date.now();
+  const attempt = installerCodeAttempts.get(attemptKey);
+
+  if (attempt && attempt.expiresAt <= now) {
+    installerCodeAttempts.delete(attemptKey);
+  } else if (attempt && attempt.count >= INSTALLER_CODE_ATTEMPT_LIMIT) {
+    res.set(
+      "Retry-After",
+      String(Math.ceil((attempt.expiresAt - now) / 1000)),
+    );
+    return res.status(429).json({
+      error: "Too many code attempts. Please try again later.",
+    });
+  }
+
+  try {
+    const panel = await Panel.findOne({ panelId }).populate("company", "name");
+    if (!panel) return res.status(404).json({ error: "Panel not found" });
+    if (panel.status === "Installed") {
+      return res.status(409).json({ error: "Installation already completed." });
+    }
+
+    const company = await Company.findById(panel.companyId).lean();
+    const code = typeof req.body.code === "string" ? req.body.code.trim() : "";
+    if (!company?.installerAccessCode || code !== company.installerAccessCode) {
+      const current = installerCodeAttempts.get(attemptKey);
+      installerCodeAttempts.set(attemptKey, {
+        count:
+          current && current.expiresAt > now ? current.count + 1 : 1,
+        expiresAt:
+          current && current.expiresAt > now
+            ? current.expiresAt
+            : now + INSTALLER_CODE_WINDOW_MS,
+      });
+      return res.status(403).json({ error: "Invalid installer code." });
+    }
+
+    installerCodeAttempts.delete(attemptKey);
+    const token = jwt.sign(
+      { purpose: "panel-installation", panelId },
+      process.env.JWT_SECRET || "dev-secret",
+      { expiresIn: "10m" },
+    );
+
+    return res.json({
+      token,
+      panel: panelPublicSummary(panel, panel.company?.name || "", true),
+    });
+  } catch (error) {
+    console.error("Installer code verification failed:", error.message);
+    return res.status(500).json({ error: "Unable to verify installer code." });
   }
 }
 
 export async function completeInstallation(req, res) {
   try {
-    const installerCode = req.body.code;
-    const panel = await Panel.findOne({ panelId: req.params.panelId });
-    if (!panel) return res.status(404).json({ error: "Panel not found" });
-
-    const company = await Company.findById(panel.companyId).lean();
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const authorization = req.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ")
+      ? authorization.slice(7)
+      : "";
+    let tokenPayload;
+    try {
+      tokenPayload = jwt.verify(token, process.env.JWT_SECRET || "dev-secret");
+    } catch {
+      return res.status(401).json({ error: "Installer verification required." });
+    }
 
     if (
-      !installerCode ||
-      installerCode !== company.installerAccessCode ||
-      !company.installerAccessCode
+      tokenPayload.purpose !== "panel-installation" ||
+      tokenPayload.panelId !== req.params.panelId
     ) {
-      return res.status(403).json({ error: "Invalid installer code." });
+      return res.status(403).json({ error: "Invalid installer authorization." });
     }
+
+    const panel = await Panel.findOne({ panelId: req.params.panelId });
+    if (!panel) return res.status(404).json({ error: "Panel not found" });
 
     if (
       panel.status === "Installed" ||
@@ -337,6 +441,7 @@ export async function completeInstallation(req, res) {
     ) {
       updates.status = "Installed";
       updates.qrGenerated = true;
+      updates.publicAccessCode = await generatePublicAccessCode();
     }
 
     const updatedPanel = await Panel.findOneAndUpdate(
@@ -351,7 +456,12 @@ export async function completeInstallation(req, res) {
     console.log(
       `[DEBUG] completeInstallation - Updated panel with company: ${panelObj.companyName}`,
     );
-    res.json({ panel: panelObj });
+    res.json({
+      panel: panelObj,
+      ...(updates.publicAccessCode
+        ? { publicAccessCode: updates.publicAccessCode }
+        : {}),
+    });
   } catch (error) {
     console.error(`[DEBUG] completeInstallation - ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });

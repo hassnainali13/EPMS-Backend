@@ -144,6 +144,7 @@ const panelSchema = new mongoose.Schema(
     qrUrl: { type: String, default: "" },
     qrCodeUrl: { type: String, default: "" },
     publicPanelUrl: { type: String, default: "" },
+    publicAccessCode: { type: String, unique: true, sparse: true, select: false },
     qrGeneratedAt: { type: Date },
     status: {
       type: String,

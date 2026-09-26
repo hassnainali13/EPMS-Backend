@@ -10,6 +10,8 @@ import {
   deletePanel,
   generateQr,
   publicPanel,
+  publicPanelDetails,
+  verifyInstallerCode,
 } from "../controllers/panelController.js";
 
 const router = express.Router();
@@ -26,6 +28,8 @@ router.post(
   generateQr,
 );
 router.put("/complete-installation/:panelId", completeInstallation);
+router.post("/public/:panelId/verify-installer", verifyInstallerCode);
+router.get("/public/:panelId/access/:accessCode", publicPanelDetails);
 router.post(
   "/",
   authenticate,
