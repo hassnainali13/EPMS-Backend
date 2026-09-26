@@ -21,3 +21,16 @@ test("panel diagrams validation rejects more than five diagrams", () => {
   assert.ok(error);
   assert.match(error.message, /at most 5 wiring diagrams/i);
 });
+
+test("legacy panels do not receive the new QR URL version by default", () => {
+  const panel = new Panel({
+    panelId: "TEST24-MCC-0002",
+    panelName: "Legacy Panel",
+    company: new mongoose.Types.ObjectId(),
+    companyId: new mongoose.Types.ObjectId(),
+  });
+
+  assert.equal(panel.publicUrlVersion, undefined);
+  assert.equal(Panel.schema.path("publicAccessCode").options.unique, true);
+  assert.equal(Panel.schema.path("publicAccessCode").options.sparse, true);
+});

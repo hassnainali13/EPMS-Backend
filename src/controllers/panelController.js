@@ -20,6 +20,83 @@ async function generatePublicAccessCode() {
   throw new Error("Unable to allocate a unique panel access code.");
 }
 
+function buildPublicPanelUrl(req, panelId, accessCode) {
+  const path = `/${encodeURIComponent(accessCode)}/${encodeURIComponent(panelId)}`;
+  const baseUrl = (process.env.PUBLIC_BASE_URL || req.get("origin") || "")
+    .trim()
+    .replace(/\/+$/, "");
+  return `${baseUrl}${path}`;
+}
+
+async function createNewQrPanel(payload, req) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const publicAccessCode = await generatePublicAccessCode();
+    const publicUrl = buildPublicPanelUrl(
+      req,
+      payload.panelId,
+      publicAccessCode,
+    );
+    try {
+      return await Panel.create({
+        ...payload,
+        publicAccessCode,
+        publicUrlVersion: 2,
+        qrUrl: publicUrl,
+        qrCodeUrl: publicUrl,
+        publicPanelUrl: publicUrl,
+      });
+    } catch (error) {
+      const isAccessCodeCollision =
+        error?.code === 11000 &&
+        (error?.keyPattern?.publicAccessCode ||
+          error?.message?.includes("publicAccessCode"));
+      if (!isAccessCodeCollision) throw error;
+    }
+  }
+  throw new Error("Unable to allocate a unique panel access code.");
+}
+
+async function ensureLegacyPanelAccessCode(panel) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (panel.publicAccessCode) return panel;
+
+    const accessCode = await generatePublicAccessCode();
+    try {
+      const claimedPanel = await Panel.findOneAndUpdate(
+        {
+          _id: panel._id,
+          publicUrlVersion: { $ne: 2 },
+          $or: [
+            { publicAccessCode: { $exists: false } },
+            { publicAccessCode: null },
+            { publicAccessCode: "" },
+          ],
+        },
+        { $set: { publicAccessCode: accessCode } },
+        { new: true },
+      )
+        .select("+publicAccessCode")
+        .populate("company", "name");
+
+      if (claimedPanel) return claimedPanel;
+
+      const latestPanel = await Panel.findById(panel._id)
+        .select("+publicAccessCode")
+        .populate("company", "name");
+      if (!latestPanel || latestPanel.publicAccessCode) return latestPanel;
+      panel = latestPanel;
+    } catch (error) {
+      const isAccessCodeCollision =
+        error?.code === 11000 &&
+        (error?.keyPattern?.publicAccessCode ||
+          error?.message?.includes("publicAccessCode"));
+      if (!isAccessCodeCollision) throw error;
+    }
+  }
+
+  throw new Error("Unable to assign a unique panel access code.");
+}
+
 function panelPublicSummary(panel, companyName, includeInstallationDetails = false) {
   const summary = {
     panelId: panel.panelId,
@@ -265,16 +342,22 @@ export async function generatePanelIdEndpoint(req, res) {
 export async function generateQr(req, res) {
   try {
     const panelId = req.params.id;
-    const panel = await Panel.findById(panelId);
+    const panel = await Panel.findById(panelId).select("+publicAccessCode");
     if (!panel) return res.status(404).json({ error: "Panel not found" });
 
-    // Build public URL (relative by default)
-    const publicPath = `/panel/${panel.panelId}`;
-    const publicUrl = (process.env.PUBLIC_BASE_URL || "") + publicPath;
+    const usesUniqueUrl =
+      panel.publicUrlVersion === 2 && panel.publicAccessCode;
+    const publicPath = usesUniqueUrl
+      ? `/${encodeURIComponent(panel.publicAccessCode)}/${encodeURIComponent(panel.panelId)}`
+      : `/panel/${panel.panelId}`;
+    const publicUrl = usesUniqueUrl
+      ? buildPublicPanelUrl(req, panel.panelId, panel.publicAccessCode)
+      : (process.env.PUBLIC_BASE_URL || "") + publicPath;
 
     // For now store the publicPanelUrl and generated timestamp
     panel.publicPanelUrl = publicUrl;
     panel.qrCodeUrl = publicUrl; // store same as QR payload URL for reference
+    panel.qrUrl = publicUrl;
     panel.qrGeneratedAt = new Date();
     await panel.save();
 
@@ -288,14 +371,21 @@ export async function generateQr(req, res) {
 export async function publicPanel(req, res) {
   try {
     const panelId = req.params.panelId;
-    const panel = await Panel.findOne({ panelId })
+    let panel = await Panel.findOne({ panelId })
       .select("+publicAccessCode")
       .populate("company", "name");
     if (!panel) return res.status(404).json({ error: "Panel not found" });
 
+    if (panel.publicUrlVersion === 2) {
+      return res.json({
+        panel: panelPublicSummary(panel, panel.company?.name || ""),
+        requiresUniqueUrl: true,
+      });
+    }
+
     if (panel.status === "Installed" && !panel.publicAccessCode) {
-      panel.publicAccessCode = await generatePublicAccessCode();
-      await panel.save();
+      panel = await ensureLegacyPanelAccessCode(panel);
+      if (!panel) return res.status(404).json({ error: "Panel not found" });
     }
 
     res.json({
@@ -316,12 +406,17 @@ export async function publicPanelDetails(req, res) {
     const panel = await Panel.findOne({
       panelId,
       publicAccessCode: accessCode,
-      status: "Installed",
     })
       .select("+publicAccessCode")
       .populate("company", "name");
 
     if (!panel) return res.status(404).json({ error: "Panel not found" });
+
+    if (panel.status !== "Installed") {
+      return res.json({
+        panel: panelPublicSummary(panel, panel.company?.name || ""),
+      });
+    }
 
     const safe = panel.toObject();
     safe.companyName = safe.company?.name || "";
@@ -358,8 +453,17 @@ export async function verifyInstallerCode(req, res) {
   }
 
   try {
-    const panel = await Panel.findOne({ panelId }).populate("company", "name");
+    const panel = await Panel.findOne({ panelId })
+      .select("+publicAccessCode")
+      .populate("company", "name");
     if (!panel) return res.status(404).json({ error: "Panel not found" });
+    if (
+      panel.publicUrlVersion === 2 &&
+      (req.body.publicAccessCode !== panel.publicAccessCode ||
+        !panel.publicAccessCode)
+    ) {
+      return res.status(404).json({ error: "Panel not found" });
+    }
     if (panel.status === "Installed") {
       return res.status(409).json({ error: "Installation already completed." });
     }
@@ -380,8 +484,12 @@ export async function verifyInstallerCode(req, res) {
     }
 
     installerCodeAttempts.delete(attemptKey);
+    const tokenPayload = { purpose: "panel-installation", panelId };
+    if (panel.publicUrlVersion === 2) {
+      tokenPayload.publicAccessCode = panel.publicAccessCode;
+    }
     const token = jwt.sign(
-      { purpose: "panel-installation", panelId },
+      tokenPayload,
       process.env.JWT_SECRET || "dev-secret",
       { expiresIn: "10m" },
     );
@@ -416,8 +524,18 @@ export async function completeInstallation(req, res) {
       return res.status(403).json({ error: "Invalid installer authorization." });
     }
 
-    const panel = await Panel.findOne({ panelId: req.params.panelId });
+    const panel = await Panel.findOne({ panelId: req.params.panelId }).select(
+      "+publicAccessCode",
+    );
     if (!panel) return res.status(404).json({ error: "Panel not found" });
+
+    if (
+      tokenPayload.publicAccessCode &&
+      (panel.publicUrlVersion !== 2 ||
+        panel.publicAccessCode !== tokenPayload.publicAccessCode)
+    ) {
+      return res.status(403).json({ error: "Invalid installer authorization." });
+    }
 
     if (
       panel.status === "Installed" ||
@@ -441,7 +559,9 @@ export async function completeInstallation(req, res) {
     ) {
       updates.status = "Installed";
       updates.qrGenerated = true;
-      updates.publicAccessCode = await generatePublicAccessCode();
+      if (panel.publicUrlVersion !== 2 && !panel.publicAccessCode) {
+        updates.publicAccessCode = await generatePublicAccessCode();
+      }
     }
 
     const updatedPanel = await Panel.findOneAndUpdate(
@@ -458,8 +578,8 @@ export async function completeInstallation(req, res) {
     );
     res.json({
       panel: panelObj,
-      ...(updates.publicAccessCode
-        ? { publicAccessCode: updates.publicAccessCode }
+      ...(updates.publicAccessCode || panel.publicAccessCode
+        ? { publicAccessCode: updates.publicAccessCode || panel.publicAccessCode }
         : {}),
     });
   } catch (error) {
@@ -589,7 +709,7 @@ export async function createPanel(req, res) {
       payload.diagrams = nextDiagrams;
     }
 
-    const panel = await Panel.create(payload);
+    const panel = await createNewQrPanel(payload, req);
 
     // Populate company name before returning
     const populatedPanel = await Panel.findById(panel._id).populate(
